@@ -9,14 +9,14 @@ namespace ECIES
         static void Main(string[] args)
         {
             var bob = new Bob();
-            
             var alice = new Alice();
 
-            var message = alice.EncryptMessage(bob.PublicKey, PlainText);
+            var (ephemeralPublicKey, iv, tag, message) = alice.EncryptMessage(
+                bob.GetEphemeralPublicKey(), PlainText);
 
-            var dmessage = bob.DecryptMessage(message);
+            var outputMessage = bob.DecryptMessage(ephemeralPublicKey, iv, tag, message);
 
-            Console.WriteLine(dmessage);
+            Console.WriteLine(outputMessage);
         }
     }
 }

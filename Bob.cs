@@ -9,25 +9,53 @@ namespace ECIES
     {
         private readonly ECDiffieHellmanCng algorithm_;
 
-        public ECDiffieHellmanPublicKey PublicKey { get; init; }
-
         public Bob()
         {
             algorithm_ = new ECDiffieHellmanCng(ECCurve.NamedCurves.nistP256);
-            PublicKey = algorithm_.PublicKey;
         }
 
-        public string DecryptMessage(EncryptedMessage message)
+        public ECDiffieHellmanPublicKey GetEphemeralPublicKey() => algorithm_.PublicKey;
+
+        public string DecryptMessage(
+            ECDiffieHellmanPublicKey otherSidePublicKey, byte[] iv, string tag, string message)
         {
             var hmacKey = new byte[32];
+            var sharedKey = new byte[32];
+            var derivedKeys = new byte[64];
             var symmetricKey = new byte[32];
 
-            var cipherTextBytes = Convert.FromBase64String(message.Message);
+            if (otherSidePublicKey == null){
+                throw new ArgumentNullException(nameof(otherSidePublicKey));
+            }
 
-            var sharedKey = algorithm_.DeriveKeyMaterial(
-                message.EphemeralPublicKey);
-            var derivedKeys = algorithm_.DeriveKeyFromHmac(
-                message.EphemeralPublicKey, HashAlgorithmName.SHA512, sharedKey);
+            if (iv == null || iv.Length == 0){
+                throw new ArgumentNullException(nameof(iv));
+            }
+
+            if (string.IsNullOrWhiteSpace(tag)){
+                throw new ArgumentNullException(nameof(tag));
+            }
+
+            if (string.IsNullOrWhiteSpace(message)){
+                throw new ArgumentNullException(nameof(message));
+            }
+
+            var cipherTextBytes = Convert.FromBase64String(message);
+
+            try{
+                sharedKey = algorithm_.DeriveKeyMaterial(otherSidePublicKey);
+            }
+            catch (Exception ex){
+                throw new CryptographicException("Could not derive shared secret", ex);
+            }
+
+            try{
+                derivedKeys = algorithm_.DeriveKeyFromHmac(
+                    otherSidePublicKey, HashAlgorithmName.SHA512, sharedKey);
+            }
+            catch (Exception ex){
+                throw new CryptographicException("Could not compute the derived keys", ex);
+            }
 
             Buffer.BlockCopy(derivedKeys, 0, hmacKey, 0, 32);
             Buffer.BlockCopy(derivedKeys, 32, symmetricKey, 0, 32);
@@ -36,14 +64,13 @@ namespace ECIES
                 var hashBytes = hmac.ComputeHash(cipherTextBytes);
                 var generatedHash = Convert.ToBase64String(hashBytes);
 
-                if (generatedHash != message.Tag){
-                    return string.Empty;
+                if (generatedHash != tag){
+                    throw new CryptographicException("HMAC check failed");
                 }
             }
 
-            using (var aes = new AesCng())
-            {
-                aes.IV = message.Iv;
+            using (var aes = new AesCng()){
+                aes.IV = iv;
                 aes.Key = symmetricKey;
 
                 using (var decryptedText = new MemoryStream()){
